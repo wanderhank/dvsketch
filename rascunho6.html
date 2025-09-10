@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="pt-BR" style="height:100%">
+<head>
+    <meta charset="utf-8" />
+    <title>Treemap + Timeline LEGO Star Wars</title>
+</head>
+<body style="height:100%;margin:0;display:flex;flex-direction:column">
+<div id="chart" style="flex:1;position:relative"></div>
+
+<!-- Botões -->
+<div style="
+      position:absolute;
+      top:20px;
+      right:20px;
+      display:flex;
+      gap:10px;
+      z-index:1000;
+  ">
+    <button id="lineBtn" style="padding:6px 12px;border:none;border-radius:6px;background:#4e79a7;color:#fff;cursor:pointer;">Linha</button>
+    <button id="barBtn" style="padding:6px 12px;border:none;border-radius:6px;background:#999;color:#fff;cursor:pointer;">Barras</button>
+</div>
+
+<!-- Botão Voltar -->
+<button id="backButton" style="
+      position:absolute;
+      bottom:20px;
+      right:20px;
+      padding:10px 20px;
+      font-weight:bold;
+      border:none;
+      border-radius:8px;
+      background:#444;
+      color:#fff;
+      cursor:pointer;
+      display:none;
+      z-index:1000;
+      transition: opacity 0.3s ease;
+  ">⬅ Voltar</button>
+
+<script src="https://echarts.apache.org/en/js/vendors/jquery@3.7.1/dist/jquery.min.js"></script>
+<script src="https://fastly.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+
+<script>
+    const uploadedDataURL = 'starwars.json';
+    const chartDom = document.getElementById('chart');
+    const myChart = echarts.init(chartDom, null, { renderer: 'canvas' });
+
+    const backButton = document.getElementById('backButton');
+    const lineBtn = document.getElementById('lineBtn');
+    const barBtn = document.getElementById('barBtn');
+
+    let chartType = 'line'; // padrão
+    let rawData = [];
+    let currentSubtheme = null;
+    let currentTrilogy = null;
+
+    myChart.showLoading();
+
+    const allowedCategories = [
+        "Episode I","Episode II","Episode III",
+        "Episode IV","Episode V","Episode VI",
+        "The Force Awakens","The Last Jedi","The Rise of Skywalker",
+        "Rogue One","Solo",
+        "The Clone Wars","Rebels","Resistance",
+        "The Mandalorian","The Bad Batch",
+        "The Book of Boba Fett","Obi-Wan Kenobi","Andor"
+    ];
+
+    const trilogyGroups = {
+        "Trilogia Prequel": ["Episode I", "Episode II", "Episode III"],
+        "Trilogia Original": ["Episode IV", "Episode V", "Episode VI"],
+        "Trilogia Sequels": ["The Force Awakens", "The Last Jedi", "The Rise of Skywalker"],
+        "Filmes Independentes": ["Rogue One", "Solo"],
+        "Séries": [
+            "The Clone Wars", "Rebels", "Resistance",
+            "The Mandalorian", "The Bad Batch",
+            "The Book of Boba Fett", "Obi-Wan Kenobi", "Andor"
+        ]
+    };
+
+    function findFieldName(obj, candidates) {
+        if (!obj || typeof obj !== 'object') return undefined;
+        const keys = Object.keys(obj);
+        const low = keys.reduce((acc, k) => { acc[k.toLowerCase()] = k; return acc; }, {});
+        for (let cand of candidates) if (low[cand.toLowerCase()]) return low[cand.toLowerCase()];
+        return undefined;
+    }
+
+    $.getJSON(uploadedDataURL)
+        .done(function(data) {
+            myChart.hideLoading();
+            rawData = data;
+
+            const themeField = findFieldName(rawData[0], ['theme']) || 'theme';
+            const subthemeField = findFieldName(rawData[0], ['subtheme']) || 'subtheme';
+
+            const filteredData = rawData.filter(item =>
+                allowedCategories.includes(String(item[subthemeField]).trim())
+            );
+
+            // ----------------- Construção de hierarquias -----------------
+            function buildGroupedHierarchy(data) {
+                const groups = {};
+                data.forEach(item => {
+                    const sub = String(item[subthemeField]).trim();
+                    for (let [group, subs] of Object.entries(trilogyGroups)) {
+                        if (subs.includes(sub)) {
+                            if (!groups[group]) groups[group] = { name: group, children: [] };
+                            let child = groups[group].children.find(c => c.name === sub);
+                            if (child) child.value += 1;
+                            else groups[group].children.push({ name: sub, value: 1 });
+                        }
+                    }
+                });
+                return Object.values(groups);
+            }
+
+            function buildSubthemeHierarchy(data, trilogy) {
+                const subs = trilogyGroups[trilogy] || [];
+                const result = [];
+                subs.forEach(sub => {
+                    const count = data.filter(d => String(d[subthemeField]).trim() === sub).length;
+                    if (count > 0) result.push({ name: sub, value: count });
+                });
+                return result;
+            }
+
+            // ----------------- Exibições -----------------
+            function showTrilogyTreemap() {
+                myChart.clear();
+                backButton.style.display = "none";
+                lineBtn.style.display = "none";
+                barBtn.style.display = "none";
+                currentTrilogy = null;
+                currentSubtheme = null;
+
+                const trilogyData = buildGroupedHierarchy(filteredData);
+
+                const option = {
+                    title: {
+                        text: 'LEGO Star Wars - Trilogias & Séries',
+                        subtext: 'Clique para explorar',
+                        left: 'center'
+                    },
+                    tooltip: { formatter: info => `<b>${info.name}</b><br/>Sets: ${info.value}` },
+                    series: [{
+                        type: 'treemap',
+                        data: trilogyData,
+                        leafDepth: 1,
+                        levels: [
+                            { itemStyle: { borderColor: '#555', borderWidth: 4, gapWidth: 4 } },
+                            { colorSaturation: [0.3,0.6], itemStyle: { borderColorSaturation:0.7, gapWidth:2, borderWidth:2 } }
+                        ]
+                    }]
+                };
+
+                myChart.setOption(option, true);
+            }
+
+            function showSubthemeTreemap(trilogy) {
+                myChart.clear();
+                backButton.style.display = "block";
+                lineBtn.style.display = "none";
+                barBtn.style.display = "none";
+                currentTrilogy = trilogy;
+                currentSubtheme = null;
+
+                const subthemes = buildSubthemeHierarchy(filteredData, trilogy);
+
+                const option = {
+                    title: {
+                        text: `Subtemas de ${trilogy}`,
+                        subtext: 'Clique em um bloco para ver timeline',
+                        left: 'center'
+                    },
+                    tooltip: { formatter: info => `<b>${info.name}</b><br/>Sets: ${info.value}` },
+                    series: [{
+                        type: 'treemap',
+                        data: subthemes,
+                        leafDepth: 1,
+                        levels: [
+                            { itemStyle: { borderColor: '#555', borderWidth: 4, gapWidth: 4 } },
+                            { colorSaturation: [0.3,0.6], itemStyle: { borderColorSaturation:0.7, gapWidth:2, borderWidth:2 } }
+                        ]
+                    }]
+                };
+
+                myChart.setOption(option, true);
+            }
+
+            function showTimeline(subtheme) {
+                myChart.clear();
+                backButton.style.display = "block";
+                lineBtn.style.display = "inline-block";
+                barBtn.style.display = "inline-block";
+                currentSubtheme = subtheme;
+
+                const subthemeSets = rawData.filter(item =>
+                    String(item[subthemeField]).trim() === subtheme
+                );
+
+                const yearlyCounts = {};
+                subthemeSets.forEach(item => {
+                    const year = item.year ?? null;
+                    if (year && !isNaN(year)) {
+                        yearlyCounts[year] = (yearlyCounts[year] || 0) + 1;
+                    }
+                });
+
+                const yearsNums = Object.keys(yearlyCounts).map(y => parseInt(y)).filter(y => !isNaN(y));
+                const minYear = Math.min(...yearsNums);
+                const maxYear = Math.max(...yearsNums);
+
+                const years = [];
+                const values = [];
+                for (let y = minYear; y <= maxYear; y++) {
+                    years.push(y.toString());
+                    values.push(yearlyCounts[y] || 0);
+                }
+
+                const option = {
+                    title: { text: `Sets de ${subtheme} por Ano`, left: 'center' },
+                    tooltip: { trigger: 'axis' },
+                    xAxis: { type: 'category', data: years, name: 'Ano' },
+                    yAxis: { type: 'value', name: 'Quantidade de Sets' },
+                    dataZoom: [
+                        { type: 'slider', start: 0, end: 100 },
+                        { type: 'inside' }
+                    ],
+                    series: [{
+                        type: chartType,
+                        data: values,
+                        smooth: chartType === 'line',
+                        symbol: chartType === 'line' ? 'circle' : 'rect',
+                        symbolSize: 8,
+                        lineStyle: { width: 3, color: '#4e79a7' },
+                        itemStyle: { color: '#4e79a7' },
+                        areaStyle: chartType === 'line' ? { color: 'rgba(78,121,167,0.2)' } : null,
+                        barMaxWidth: chartType === 'bar' ? 40 : null
+                    }]
+                };
+
+                myChart.setOption(option, true);
+            }
+
+            // ----------------- Navegação -----------------
+            showTrilogyTreemap();
+
+            myChart.on('click', function (params) {
+                if (!params?.data) return;
+                if (params.data.children) {
+                    // clique em trilogia -> subtemas
+                    showSubthemeTreemap(params.data.name);
+                } else if (currentTrilogy && params.data.name) {
+                    // clique em subtema -> timeline
+                    showTimeline(params.data.name);
+                }
+            });
+
+            backButton.addEventListener('click', () => {
+                if (currentSubtheme) {
+                    showSubthemeTreemap(currentTrilogy);
+                } else if (currentTrilogy) {
+                    showTrilogyTreemap();
+                }
+            });
+
+            lineBtn.addEventListener('click', () => {
+                chartType = 'line';
+                if (currentSubtheme) showTimeline(currentSubtheme);
+                lineBtn.style.background = '#4e79a7';
+                barBtn.style.background = '#999';
+            });
+
+            barBtn.addEventListener('click', () => {
+                chartType = 'bar';
+                if (currentSubtheme) showTimeline(currentSubtheme);
+                barBtn.style.background = '#4e79a7';
+                lineBtn.style.background = '#999';
+            });
+
+            window.addEventListener('resize', () => myChart.resize());
+        })
+        .fail(function(jqxhr, textStatus, error) {
+            myChart.hideLoading();
+            console.error('Falha ao carregar JSON:', textStatus, error);
+        });
+</script>
+
+
+</body>
+</html>
